@@ -6,27 +6,31 @@ use App\Models\Category;
 use Illuminate\Database\Eloquent\Model;
 
 use MoonShine\Decorations\Block;
-use MoonShine\Fields\BelongsTo;
+use MoonShine\Enums\PageType;
+use MoonShine\Fields\Relationships\BelongsTo;
 use MoonShine\Fields\Text;
-use MoonShine\Filters\TextFilter;
-use MoonShine\Resources\Resource;
+use MoonShine\Resources\ModelResource;
 use MoonShine\Fields\ID;
 
-class CategoryResource extends Resource
+class CategoryResource extends ModelResource
 {
-	public static string $model = Category::class;
+    protected string $model = Category::class;
 
-	public static string $title = 'Category';
+    protected string $title = 'Category';
 
-    public string $titleField = 'title';
+    protected string $column = 'title';
 
-    public static bool $withPolicy = true;
+    protected bool $withPolicy = true;
 
     protected bool $createInModal = true;
 
     protected bool $editInModal = true;
 
-    public static array $with = ['category'];
+    protected array $with = ['category'];
+
+    protected string $sortColumn = 'sorting';
+
+    protected ?PageType $redirectAfterSave = PageType::DETAIL;
 
 	public function fields(): array
 	{
@@ -50,17 +54,5 @@ class CategoryResource extends Resource
     public function search(): array
     {
         return ['id', 'title'];
-    }
-
-    public function filters(): array
-    {
-        return [
-            TextFilter::make('Title')
-        ];
-    }
-
-    public function actions(): array
-    {
-        return [];
     }
 }

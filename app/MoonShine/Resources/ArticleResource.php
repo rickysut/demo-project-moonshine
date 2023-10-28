@@ -4,66 +4,70 @@ namespace App\MoonShine\Resources;
 
 use App\Models\Article;
 use App\Models\Comment;
+use App\MoonShine\Controllers\ArticleController;
+use Closure;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
-use MoonShine\Actions\ExportAction;
-use MoonShine\Actions\ImportAction;
-use MoonShine\BulkActions\BulkAction;
+use Illuminate\Support\Facades\Route;
+use Illuminate\View\ComponentAttributeBag;
+use MoonShine\ActionButtons\ActionButton;
+use MoonShine\Buttons\IndexPage\DeleteButton;
 use MoonShine\Decorations\Block;
-use MoonShine\Decorations\Button;
 use MoonShine\Decorations\Collapse;
 use MoonShine\Decorations\Column;
 use MoonShine\Decorations\Flex;
 use MoonShine\Decorations\Grid;
 use MoonShine\Decorations\Heading;
+use MoonShine\Decorations\LineBreak;
 use MoonShine\Decorations\Tab;
 use MoonShine\Decorations\Tabs;
-use MoonShine\Fields\BelongsTo;
-use MoonShine\Fields\BelongsToMany;
+use MoonShine\Decorations\TextBlock;
+use MoonShine\Enums\PageType;
 use MoonShine\Fields\Color;
+use MoonShine\Fields\DateRange;
 use MoonShine\Fields\File;
-use MoonShine\Fields\HasMany;
+use MoonShine\Fields\Hidden;
 use MoonShine\Fields\ID;
 use MoonShine\Fields\Image;
 use MoonShine\Fields\Json;
-use MoonShine\Fields\NoInput;
 use MoonShine\Fields\Number;
-use MoonShine\Fields\SlideField;
-use MoonShine\Fields\SwitchBoolean;
+use MoonShine\Fields\Preview;
+use MoonShine\Fields\RangeSlider;
+use MoonShine\Fields\Relationships\BelongsTo;
+use MoonShine\Fields\Relationships\BelongsToMany;
+use MoonShine\Fields\Relationships\HasMany;
+use MoonShine\Fields\Relationships\HasOne;
+use MoonShine\Fields\Slug;
+use MoonShine\Fields\StackFields;
+use MoonShine\Fields\Switcher;
 use MoonShine\Fields\Text;
 use MoonShine\Fields\TinyMce;
 use MoonShine\Fields\Url;
-use MoonShine\Filters\BelongsToFilter;
-use MoonShine\Filters\BelongsToManyFilter;
-use MoonShine\Filters\DateRangeFilter;
-use MoonShine\Filters\SlideFilter;
-use MoonShine\Filters\SwitchBooleanFilter;
-use MoonShine\Filters\TextFilter;
-use MoonShine\FormActions\FormAction;
-use MoonShine\FormComponents\ChangeLogFormComponent;
-use MoonShine\ItemActions\ItemAction;
+use MoonShine\Handlers\ExportHandler;
+use MoonShine\Handlers\ImportHandler;
 use MoonShine\Metrics\ValueMetric;
 use MoonShine\QueryTags\QueryTag;
-use MoonShine\Resources\Resource;
+use MoonShine\Resources\ModelResource;
+use MoonShine\Resources\MoonShineUserResource;
 
-class ArticleResource extends Resource
+class ArticleResource extends ModelResource
 {
-    public static string $model = Article::class;
+    public string $model = Article::class;
 
-    public static string $title = 'Articles';
+    public string $title = 'Articles';
 
-    public static string $orderField = 'created_at';
+    public string $sortColumn = 'created_at';
 
-    public static string $orderType = 'DESC';
+    public bool $withPolicy = true;
 
-    public static bool $withPolicy = true;
-
-    public static array $with = [
+    public array $with = [
         'author',
-        'comments'
+        'comments',
     ];
 
-    public string $titleField = 'title';
+    public string $column = 'title';
+
+    protected ?PageType $redirectAfterSave = PageType::INDEX;
 
     public function fields(): array
     {
@@ -76,15 +80,18 @@ class ArticleResource extends Resource
             Grid::make([
                 Column::make([
                     Block::make('Main information', [
-                        Button::make(
+                        ActionButton::make(
                             'Link to article',
-                            $this->getItem() ? route('articles.show', $this->getItem()) : '/',
-                            true
-                        )->icon('clip'),
+                            $this->getItem()?->getKey() ? route('articles.show', $this->getItem()) : '/',
+                        )
+                            ->icon('heroicons.outline.paper-clip')
+                            ->blank(),
 
-                        BelongsTo::make('Author', resource: 'name')
-                            ->searchable()
-                            ->canSee(fn() => auth('moonshine')->user()->moonshine_user_role_id === 1)
+                        LineBreak::make(),
+
+                        BelongsTo::make('Author', resource: new MoonShineUserResource())
+                            ->asyncSearch()
+                            ->canSee(fn () => auth()->user()->moonshine_user_role_id === 1)
                             ->required(),
 
                         Number::make('Comments', 'comments_count')
@@ -95,50 +102,54 @@ class ArticleResource extends Resource
 
                             Flex::make('flex-titles', [
                                 Text::make('Title')
-                                    ->fieldContainer(false)
+                                    ->withoutWrapper()
                                     ->required(),
 
-                                Text::make('Slug')
+                                Slug::make('Slug')
+                                    ->from('title')
+                                    ->unique()
+                                    ->separator('-')
                                     ->hideOnIndex()
-                                    ->fieldContainer(false)
+                                    ->withoutWrapper()
                                     ->required(),
                             ])
                                 ->justifyAlign('start')
                                 ->itemsAlign('start'),
                         ]),
 
-                        Image::make('Thumbnail')
-                            ->removable()
-                            ->disk('public')
-                            ->dir('articles'),
+                        StackFields::make('Files')->fields([
+                            Image::make('Thumbnail')
+                                ->removable()
+                                ->disk('public')
+                                ->dir('articles'),
 
-                        File::make('Files')
-                            ->disk('public')
-                            ->multiple()
-                            ->removable()
-                            ->dir('articles'),
+                            File::make('Files')
+                                ->disk('public')
+                                ->multiple()
+                                ->removable()
+                                ->dir('articles'),
+                        ]),
 
-                        NoInput::make('No input field', 'no_input', static fn() => fake()->realText())
+                        Preview::make('No input field', 'no_input', static fn () => fake()->realText())
                             ->hideOnIndex(),
 
 
-                        SlideField::make('Age')
+                        RangeSlider::make('Age')
                             ->min(0)
                             ->max(60)
                             ->step(1)
-                            ->toField('age_to')
-                            ->fromField('age_from'),
+                            ->fromTo('age_from', 'age_to'),
 
                         Number::make('Rating')
                             ->hint('From 0 to 5')
                             ->min(0)
                             ->max(5)
-                            ->addLink('CutCode', 'https://cutcode.dev', true)
+                            ->link('https://cutcode.dev', 'CutCode', blank: true)
                             ->stars(),
 
                         Url::make('Link')
                             ->hint('Url')
-                            ->addLink('CutCode', 'https://cutcode.dev', true)
+                            ->link('https://cutcode.dev', 'CutCode', blank: true)
                             ->expansion('url'),
 
                         Color::make('Color'),
@@ -147,54 +158,23 @@ class ArticleResource extends Resource
 
                         Json::make('Data')->fields([
                             Text::make('Title'),
-                            Text::make('Value')
-                        ])->removable(),
+                            Text::make('Value'),
+                        ])->creatable()->removable(),
 
-                        SwitchBoolean::make('Active')
+                        Switcher::make('Active'),
                     ]),
                 ])->columnSpan(6),
 
                 Column::make([
-                    Block::make('Comments', [
-                        HasMany::make('Comments')
-                            ->fields([
-                                ID::make()->sortable(),
-                                BelongsTo::make('Article'),
-                                BelongsTo::make('User'),
-                                Text::make('Text')->required(),
-                                Image::make('Files')
-                                    ->multiple()
-                                    ->removable()
-                                    ->disk('public')
-                                    ->dir('comments'),
-                            ])
-                            ->removable()
-                            ->hideOnIndex()
-                            ->fullPage(),
-                    ]),
-
-                    /* Block::make([
-                         HasOne::make('Comment')
-                             ->fields([
-                                 ID::make()->sortable(),
-                                 BelongsTo::make('Article'),
-                                 BelongsTo::make('User'),
-                                 Text::make('Text')->required(),
-                             ])
-                             ->removable()
-                             ->hideOnIndex()
-                             ->fullPage()
-                     ]),*/
-
                     Block::make('Seo and categories', [
                         Tabs::make([
                             Tab::make('Seo', [
                                 Text::make('Seo title')
-                                    ->fieldContainer(false)
+                                    ->withoutWrapper()
                                     ->hideOnIndex(),
 
                                 Text::make('Seo description')
-                                    ->fieldContainer(false)
+                                    ->withoutWrapper()
                                     ->hideOnIndex(),
 
                                 TinyMce::make('Description')
@@ -209,22 +189,22 @@ class ArticleResource extends Resource
                                 BelongsToMany::make('Categories')
                                     ->tree('category_id')
                                     ->hideOnIndex(),
-                            ])
-                        ])
+                            ]),
+                        ]),
                     ]),
                 ])->columnSpan(6),
             ]),
 
-            HasMany::make('Comments')
-                ->hideOnIndex()
-                ->resourceMode()
-        ];
-    }
+            HasMany::make('Comments', resource: new CommentResource())
+                ->async()
+                ->creatable()
+                ->hideOnDetail()
+                ->hideOnIndex(),
 
-    public function components(): array
-    {
-        return [
-            ChangeLogFormComponent::make('ChangeLog'),
+
+            HasOne::make('Comment', resource: new CommentResource())
+                ->hideOnDetail()
+                ->hideOnIndex(),
         ];
     }
 
@@ -233,26 +213,29 @@ class ArticleResource extends Resource
         return [
             QueryTag::make(
                 'Article with author',
-                Article::query()->whereNotNull('author_id')
+                static fn (Builder $q) => $q->whereNotNull('author_id')
             ),
 
             QueryTag::make(
                 'Article without an author',
-                Article::query()->whereNull('author_id')
-            )->icon('users')
+                static fn (Builder $q) => $q->whereNull('author_id')
+            )->icon('heroicons.outline.users'),
         ];
     }
 
     public function metrics(): array
     {
         return [
-            ValueMetric::make('Articles')
-                ->value(Article::query()->count())
-                ->columnSpan(6),
-
-            ValueMetric::make('Comments')
-                ->value(Comment::query()->count())
-                ->columnSpan(6),
+            Grid::make([
+                Column::make([
+                    ValueMetric::make('Articles')
+                        ->value(Article::query()->count()),
+                ])->columnSpan(6),
+                Column::make([
+                    ValueMetric::make('Comments')
+                        ->value(Comment::query()->count()),
+                ])->columnSpan(6),
+            ]),
         ];
     }
 
@@ -261,18 +244,19 @@ class ArticleResource extends Resource
         return parent::query()
             ->withCount('comments')
             ->when(
-                auth('moonshine')->user()->moonshine_user_role_id !== 1,
-                fn($q) => $q->where('author_id', auth('moonshine')->id())
+                auth()->user()->moonshine_user_role_id !== 1,
+                fn ($q) => $q->where('author_id', auth()->id())
             );
     }
 
-    public function trClass(Model $item, int $index): string
+    public function trAttributes(): Closure
     {
-        if ($this->getItem()->author?->moonshine_user_role_id === 2) {
-            return 'green';
-        }
-
-        return parent::trClass($item, $index);
+        return function (mixed $data, int $row, ComponentAttributeBag $attr): ComponentAttributeBag {
+            return $attr->when(
+                $data->author?->moonshine_user_role_id !== 1,
+                fn (ComponentAttributeBag $a) => $a->merge(['class' => 'bgc-green'])
+            );
+        };
     }
 
     public function rules(Model $item): array
@@ -281,63 +265,30 @@ class ArticleResource extends Resource
             'title' => ['required', 'string', 'min:2'],
             'slug' => ['required', 'string', 'min:1'],
             'description' => ['required', 'string', 'min:1'],
-            'thumbnail' => ['image']
+            'thumbnail' => ['image'],
         ];
     }
 
-    public function bulkActions(): array
+    protected function beforeCreating(Model $item): Model
     {
-        return [
-            BulkAction::make('Active', function (Article $article) {
-                $article->update([
-                    'active' => true
-                ]);
-            })->icon('heroicons.check-circle')
-        ];
-    }
-
-    protected function beforeCreating(Model $item)
-    {
-        if (auth('moonshine')->user()->moonshine_user_role_id !== 1) {
+        if (auth()->user()->moonshine_user_role_id !== 1) {
             request()->merge([
-                'author_id' => auth('moonshine')->id()
+                'author_id' => auth()->id(),
             ]);
         }
+
+        return $item;
     }
 
-    protected function beforeUpdating(Model $item)
+    protected function beforeUpdating(Model $item): Model
     {
-        if (auth('moonshine')->user()->moonshine_user_role_id !== 1) {
+        if (auth()->user()->moonshine_user_role_id !== 1) {
             request()->merge([
-                'author_id' => auth('moonshine')->id()
+                'author_id' => auth()->id(),
             ]);
         }
-    }
 
-    public function itemActions(): array
-    {
-        return [
-            ItemAction::make('Go to', function (Article $model) {
-                header("Location: ".route('articles.show', $model));
-
-                die();
-            })->icon('clip')
-        ];
-    }
-
-    public function formActions(): array
-    {
-        return [
-            FormAction::make('Delete', function (Article $model) {
-                $model->delete();
-            })->icon('delete'),
-
-            FormAction::make('Preview', function (Article $model) {
-                header("Location: ".route('articles.show', $model));
-
-                die();
-            })->icon('clip')
-        ];
+        return $item;
     }
 
     public function search(): array
@@ -348,42 +299,69 @@ class ArticleResource extends Resource
     public function filters(): array
     {
         return [
-            TextFilter::make('Title'),
+            Text::make('Title'),
 
-            BelongsToFilter::make('Author', resource: 'name')
+            BelongsTo::make('Author', resource: new UserResource())
                 ->nullable()
-                ->canSee(fn() => auth('moonshine')->user()->moonshine_user_role_id === 1),
+                ->canSee(fn () => auth()->user()->moonshine_user_role_id === 1),
 
-            TextFilter::make('Slug'),
+            Slug::make('Slug'),
 
-            BelongsToManyFilter::make('Categories')
-                ->select(),
+            BelongsToMany::make('Categories')
+                ->selectMode(),
 
-            DateRangeFilter::make('Created at'),
-
-            SlideFilter::make('Age')
-                ->fromField('age_from')
-                ->toField('age_to')
-                ->min(0)
-                ->max(60),
-
-            SwitchBooleanFilter::make('Active')
+            Switcher::make('Active'),
         ];
     }
 
-    public function actions(): array
+    public function buttons(): array
     {
         return [
-            ExportAction::make('Export')
-                ->disk('public')
-                ->dir('exports')
-                ->queue(),
+            ActionButton::make('Active', route('moonshine.articles.mass-active', $this->uriKey()))
+                ->inModal(fn () => 'Active', fn (ActionButton $action): string => (string) form(
+                    $action->url(),
+                    fields: [
+                        Hidden::make('ids')->customAttributes([
+                            'class' => 'actionsCheckedIds',
+                        ]),
+                        TextBlock::make('', __('moonshine::ui.confirm_message')),
+                        Text::make('To confirm, write "yes"', 'confirm')
+                            ->customAttributes(['placeholder' => 'Or no']),
+                    ]
+                )
+                    ->async()
+                    ->submit(__('moonshine::ui.delete'), ['class' => 'btn-secondary']))
+                ->bulk(),
 
-            ImportAction::make('Import')
-                ->disk('public')
-                ->dir('imports')
-                ->deleteAfter()
-                ->queue()
+            ActionButton::make(
+                'Go to',
+                static fn (Article $model) => route('articles.show', $model)
+            )->icon('heroicons.outline.paper-clip'),
         ];
+    }
+
+    public function formButtons(): array
+    {
+        return [
+            DeleteButton::for($this),
+        ];
+    }
+
+    public function export(): ?ExportHandler
+    {
+        return null;
+    }
+
+    public function import(): ?ImportHandler
+    {
+        return null;
+    }
+
+    protected function resolveRoutes(): void
+    {
+        parent::resolveRoutes();
+
+        Route::post('mass-active', [ArticleController::class, 'massActive'])
+            ->name('articles.mass-active');
     }
 }

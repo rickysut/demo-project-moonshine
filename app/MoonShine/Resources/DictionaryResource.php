@@ -1,44 +1,71 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\MoonShine\Resources;
 
 use App\Models\Dictionary;
+use App\MoonShine\Pages\Dictionary\DictionaryDetailPage;
+use App\MoonShine\Pages\Dictionary\DictionaryFormPage;
+use App\MoonShine\Pages\Dictionary\DictionaryIndexPage;
 use Illuminate\Database\Eloquent\Model;
 
 use MoonShine\Decorations\Block;
-use MoonShine\Fields\Image;
+use MoonShine\Enums\ClickAction;
+use MoonShine\Fields\Slug;
 use MoonShine\Fields\Text;
 use MoonShine\Fields\TinyMce;
-use MoonShine\Filters\TextFilter;
-use MoonShine\Resources\Resource;
+use MoonShine\Resources\ModelResource;
 use MoonShine\Fields\ID;
 
-class DictionaryResource extends Resource
+class DictionaryResource extends ModelResource
 {
-	public static string $model = Dictionary::class;
+    protected string $model = Dictionary::class;
 
-	public static string $title = 'Dictionary';
+    protected string $title = 'Dictionary';
 
-    public static bool $withPolicy = true;
+    protected bool $withPolicy = true;
 
-	public function fields(): array
-	{
-		return [
-            Block::make('', [
+    protected bool $isAsync = true;
+
+    protected bool $createInModal = true;
+
+    protected bool $editInModal = true;
+
+    protected ?ClickAction $clickAction = ClickAction::EDIT;
+
+    public function fields(): array
+    {
+        return [
+            Block::make([
                 ID::make()->sortable(),
                 Text::make('Title')->required(),
-                Text::make('Slug')->required(),
-
-                TinyMce::make('Description')
-                    //->required()
-                    ->hideOnIndex(),
+                Slug::make('Slug')
+                    ->unique()
+                    ->separator('-')
+                    ->from('title')
+                    ->required(),
+                TinyMce::make('Description'),
             ])
         ];
-	}
+    }
 
-	public function rules(Model $item): array
-	{
-	    return [
+    public function pages(): array
+    {
+        return [
+            DictionaryIndexPage::make($this->title()),
+            DictionaryFormPage::make(
+                $this->getItemID()
+                    ? __('moonshine::ui.edit')
+                    : __('moonshine::ui.add')
+            ),
+            DictionaryDetailPage::make(__('moonshine::ui.show')),
+        ];
+    }
+
+    public function rules(Model $item): array
+    {
+        return [
             'title' => ['required', 'string', 'min:1'],
             'slug' => ['required', 'string', 'min:1'],
             'description' => ['required', 'string', 'min:1'],
@@ -53,12 +80,8 @@ class DictionaryResource extends Resource
     public function filters(): array
     {
         return [
-            TextFilter::make('Title')
+            Text::make('Title')
         ];
     }
-
-    public function actions(): array
-    {
-        return [];
-    }
 }
+
